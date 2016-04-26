@@ -17,7 +17,7 @@ volatile unsigned long long coarse_count = 0;
 
 // hardware connections to TDC2700 -- need to reassign these more logically (todo in Eagle)
 
-struct chanTDC7200_t {
+struct chanTDC7200 {
   const int ENABLE;
   const int INTB;
   const int CSB;
@@ -29,11 +29,22 @@ struct chanTDC7200_t {
   long long unsigned stop_time;
 };
 
-static chanTDC7200_t ChanA = { 13, 12, 11, 6, 0, 0, 0, 0, 0 }; // I/O pins on Arduino
-static chanTDC7200_t ChanB = { 10, 9, 8, 7, 0, 0, 0, 0, 0 };
-chanTDC7200_t* ChA = &ChanA;  // pointer to Channel A
-chanTDC7200_t* ChB = &ChanB;
-
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0])
+//  Define Channels
+static struct chanTDC7200 channels[] = {
+	{
+		.ENABLE = 13,
+		.INTB = 12,
+		.CSB = 11,
+		.STOP = 6,
+	},
+	{
+		.ENABLE = 10,
+		.INTB = 9,
+		.CSB = 8,
+		.STOP = 7,
+	},
+};
 
 // TDC7200 register addresses
 const int CONFIG1 = 0x00;                 // default 0x00
@@ -70,58 +81,54 @@ const int CALIBRATION2 = 0x1C;            // default 0x00_0000
 
 
 void setup() {
+  int i;
   // start the SPI library:
   SPI.begin();
   
   pinMode(int_pin, INPUT);
   
-  pinMode(ChA->ENABLE,OUTPUT);
-  pinMode(ChA->INTB,INPUT);
-  pinMode(ChA->CSB,OUTPUT);
-  pinMode(ChA->STOP,INPUT);
-  pinMode(ChB->ENABLE,OUTPUT);
-  pinMode(ChB->INTB,INPUT);
-  pinMode(ChB->CSB,OUTPUT);
-  pinMode(ChB->STOP,INPUT);
-  
+  for(i = 0; i < ARRAY_SIZE(channels); ++i) {
+  	pinMode(channels[i].ENABLE,OUTPUT);
+  	pinMode(channels[i].INTB,INPUT);
+  	pinMode(channels[i].CSB,OUTPUT);
+  	pinMode(channels[i].STOP,INPUT);
+  	TDC_setup(&channels[i]);
+  }
+   
   attachInterrupt(interrupt, coarse_timer, RISING);
   
-  TDC_setup(ChA);
-  TDC_setup(ChB);
   delay(10);
-  ready_next(ChA);
-  ready_next(ChB);
+  
+  for(i = 0; i < ARRAY_SIZE(channels); ++i)
+  	ready_next(&channel[i]);
   
   Serial.begin(115200);
   Serial.println("Starting...");
 }
 
 void loop() {
- 
-  if (ChA->STOP) 
-    ChA->stop_time = coarse_count; // capture time stamp of gated stop clock
- 
-  if (ChB->STOP) 
-    ChB->stop_time = coarse_count;
+  int i;
 
-  if (ChA->INTB) { // channel measurement complete
-    ChA->result = TDC_calc(ChA); // get registers and calc TOF
-    ready_next(ChA); // enable next measurement
-  }
-  
-  if (ChB->INTB) {
-    ChB->result = TDC_calc(ChB);
-    ready_next(ChB);
+  for(i = 0; i < ARRAY_SIZE(channels); ++i) {
+  	if(channel[i].STOP)
+  		channel[i].stop_time = coarse_count;
+  	if(channel[i].INTB) {
+  		channel[i].result = TDC_calc(&channel[i]);
+  		ready_next(channel[i]);
+  	}
   }
    
    // if we have both channels, subtract channel 0 from channel 1, print result, and reset vars
-   if (ChanA.result && ChanB.result) { 
-    output_ti();
-    ChA->result = 0;
-    ChB->result = 0;
-    ChA->stop_time = 0;
-    ChB->stop_time = 0;
-   } 
+	//  I got lazy here.  There's probably some loop that implements the logic you want
+	//  to implement for producing results.  Something like keeping a counter of the number
+	//  of results you've gotten and comparing it to ARRAY_SIZE(channels)
+   if (channel[0].result && channel[1].result) { 
+	output_ti();
+	for(i = 0; i < ARRAY_SIZE(channels); ++i) {
+		channel[0].result = 0;
+		channel[i].stop_time = 0;
+	}
+  } 
 }  
 
 // ISR for timer. NOTE: uint_64 rollover would take
@@ -133,19 +140,19 @@ void coarse_timer() {
 
 // Initial config for TDC7200
 
-int TDC_setup(chanTDC7200_t* channel) {
+int TDC_setup(struct chanTDC7200 *channel) {
   digitalWrite(channel->ENABLE, HIGH);
 }
 
 
 // Fetch and calculate results from TDC7200
-int TDC_calc(chanTDC7200_t* channel) {
+int TDC_calc(struct chanTDC7200 *channel) {
     TDC_read(channel);
     // calc the values (John...)
 }
 
 // Read TDC for channel
-void TDC_read(chanTDC7200_t* channel) {
+void TDC_read(struct chanTDC7200 *channel) {
 
   byte inByte = 0;
   int timeResult = 0;
@@ -202,7 +209,7 @@ void TDC_read(chanTDC7200_t* channel) {
 
 
 // Enable next measurement cycle
-void ready_next(chanTDC7200_t* channel) {
+void ready_next(struct chanTDC7200 *channel) {
   // needs to set the enable bit (START_MEAS in CONFIG1)
     writeTDC7200(channel, CONFIG1, 0x03);  // measurement mode 2 ('01')
 }
@@ -211,7 +218,7 @@ void ready_next(chanTDC7200_t* channel) {
 void output_ti() {
 }
 
-void writeTDC7200(chanTDC7200_t* channel, byte address, byte value) {
+void writeTDC7200(struct chanTDC7200 *channel, byte address, byte value) {
 
   // take the chip select low to select the device:
   digitalWrite(channel->CSB, LOW);
@@ -223,7 +230,7 @@ void writeTDC7200(chanTDC7200_t* channel, byte address, byte value) {
 }
 
 
-byte readTDC7200(chanTDC7200_t* channel, byte address) {
+byte readTDC7200(struct chanTDC7200 *channel, byte address) {
   byte inByte = 0;
 
     // take the chip select low to select the device:
