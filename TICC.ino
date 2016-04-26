@@ -22,6 +22,7 @@ struct chanTDC7200 {
   const int INTB;
   const int CSB;
   const int STOP;
+  const char chan_id;
   int timeresult;
   int clockresult;
   int calresult;
@@ -37,12 +38,14 @@ static struct chanTDC7200 channels[] = {
 		.INTB = 12,
 		.CSB = 11,
 		.STOP = 6,
+		.chan_id = 'A',
 	},
 	{
 		.ENABLE = 10,
 		.INTB = 9,
 		.CSB = 8,
 		.STOP = 7,
+		.chan_id = 'B',
 	},
 };
 
@@ -108,24 +111,24 @@ void setup() {
 
 void loop() {
   int i;
+  int num_results;
 
   for(i = 0; i < ARRAY_SIZE(channels); ++i) {
   	if(channel[i].STOP)
   		channel[i].stop_time = coarse_count;
   	if(channel[i].INTB) {
   		channel[i].result = TDC_calc(&channel[i]);
-  		ready_next(channel[i]);
+  		ready_next(&channel[i]);
   	}
+  	if(channel[i].result)
+  		++num_results;
   }
    
-   // if we have both channels, subtract channel 0 from channel 1, print result, and reset vars
-	//  I got lazy here.  There's probably some loop that implements the logic you want
-	//  to implement for producing results.  Something like keeping a counter of the number
-	//  of results you've gotten and comparing it to ARRAY_SIZE(channels)
-   if (channel[0].result && channel[1].result) { 
+   // if we have all channels, subtract channel 0 from channel 1, print result, and reset vars
+   if (num_results == ARRAY_SIZE(channels)) { 
 	output_ti();
 	for(i = 0; i < ARRAY_SIZE(channels); ++i) {
-		channel[0].result = 0;
+		channel[i].result = 0;
 		channel[i].stop_time = 0;
 	}
   } 
